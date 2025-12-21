@@ -8,6 +8,7 @@
 import SwiftData
 import SwiftUI
 
+/// Displays a ranked leaderboard of all benchmark runs sorted by score.
 struct LeaderboardView: View {
     @Query(
         sort: [
@@ -27,11 +28,14 @@ struct LeaderboardView: View {
                         description: Text("Run a benchmark to see results on the leaderboard.")
                     )
                 } else {
-                    List(runs) { run in
+                    List(runs.enumerated(), id: \.element.id) { index, run in
                         NavigationLink(value: run) {
-                            LeaderboardRowView(run: run)
+                            LeaderboardRowView(rank: index + 1, run: run)
                         }
                     }
+                    #if os(iOS) || os(visionOS)
+                    .listStyle(.insetGrouped)
+                    #endif
                     .scrollIndicators(.hidden)
                 }
             }
