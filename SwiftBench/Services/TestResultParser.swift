@@ -88,6 +88,41 @@ enum TestResultParser {
                     }
                 }
             }
+
+            // Also try to parse from Test Suite summary (XCTest 5.x+)
+            // Format: "Test Suite 'All tests' passed at 12/12/23 16:23:45"
+            // Or: "Test Suite 'All tests' failed at 12/12/23 16:23:45"
+            for line in lines {
+                let lineStr = String(line)
+                if lineStr.contains("Test Suite") && lineStr.contains("All tests") {
+                    if lineStr.contains("passed") {
+                        // When test suite passed, look for test count in previous lines
+                        // Pattern: "Test Suite 'GeneratedCodeTests' passed at..."
+                        for offset in 1...min(10, lines.count - 1) {
+                            let lineIndex = lines.firstIndex(of: line)
+                            if lineIndex == nil { break }
+                            let offsetIndex = lines.index(lineIndex!, offsetBy: -offset)
+                            if offsetIndex >= lines.startIndex {
+                                let nearbyLine = String(lines[offsetIndex])
+                                // Look for test counts like "Executed X tests" or just "X tests"
+                                if let result = parseSummaryLine(nearbyLine) {
+                                    return result
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        print("[DEBUG] TestResultParser parsed:")
+        print("  - Passed: \(passed)")
+        print("  - Failed: \(failed)")
+        print("  - Total: \(passed + failed)")
+        print("  - Failure messages: \(failureMessages)")
+        if testOutput.count > 0 {
+            print("[DEBUG] Raw test output (first 1000 chars):")
+            print(String(testOutput.prefix(1000)))
         }
 
         return ParsedTestResult(

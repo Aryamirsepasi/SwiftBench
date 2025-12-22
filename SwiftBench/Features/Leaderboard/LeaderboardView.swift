@@ -18,8 +18,17 @@ struct LeaderboardView: View {
     )
     private var runs: [BenchmarkRun]
 
+    @Environment(\.modelContext) private var modelContext
+    @Environment(\.dismiss) private var dismiss
+
     @State private var selectedFilter: LeaderboardFilter = .all
     @State private var selectedSort: LeaderboardSort = .score
+    @State private var shareSheet: ShareSheet?
+
+    // Alert states
+    @State private var showingDeleteAlert = false
+    @State private var showingResetAlert = false
+    @State private var runToDelete: BenchmarkRun?
 
     var filteredAndSortedRuns: [BenchmarkRun] {
         let filtered = selectedFilter.filter(runs)
@@ -46,6 +55,17 @@ struct LeaderboardView: View {
                                 NavigationLink(value: run) {
                                     LeaderboardRowView(rank: index + 1, run: run)
                                 }
+                                #if os(iOS) || os(visionOS)
+                                .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                                    Button {
+                                        runToDelete = run
+                                        showingDeleteAlert = true
+                                    } label: {
+                                        Label("Delete", systemImage: "trash")
+                                    }
+                                    .tint(.red)
+                                }
+                                #endif
                             }
                         }
                     }
@@ -59,6 +79,53 @@ struct LeaderboardView: View {
             .navigationDestination(for: BenchmarkRun.self) { run in
                 BenchmarkRunDetailView(run: run)
             }
+            .toolbar {
+                ToolbarItem(placement: .primaryAction) {
+                    Menu {
+                        Button {
+                            exportCSV()
+                        } label: {
+                            Label("Export CSV", systemImage: "square.and.arrow.down")
+                        }
+
+                        Divider()
+
+                        Button {
+                            showingResetAlert = true
+                        } label: {
+                            Label("Reset Leaderboard", systemImage: "trash")
+                        }
+                        .foregroundStyle(.red)
+                    } label: {
+                        Label("Actions", systemImage: "ellipsis.circle")
+                    }
+                }
+            }
+            .alert("Delete Run", isPresented: $showingDeleteAlert, presenting: runToDelete) { run in
+                Button("Cancel", role: .cancel) { }
+                Button("Delete", role: .destructive) {
+                    deleteRun(run)
+                }
+            } message: { run in
+                Text("Are you sure you want to delete the run by \"\(run.modelIdentifier)\"?")
+            }
+            .alert("Reset Leaderboard", isPresented: $showingResetAlert) {
+                Button("Cancel", role: .cancel) { }
+                Button("Reset", role: .destructive) {
+                    resetLeaderboard()
+                }
+            } message: {
+                Text("Are you sure you want to delete all \(runs.count) benchmark runs? This action cannot be undone.")
+            }
+            #if os(iOS) || os(visionOS)
+            .sheet(item: $shareSheet) { sheet in
+                ShareView(sheet: sheet)
+            }
+            #elseif os(macOS)
+            .sheet(item: $shareSheet) { sheet in
+                ShareView(sheet: sheet)
+            }
+            #endif
         }
     }
 
@@ -80,6 +147,64 @@ struct LeaderboardView: View {
                 .pickerStyle(.menu)
             }
             .labelsHidden()
+        }
+    }
+
+    // MARK: - Actions
+
+    /// Deletes a single benchmark run.
+    private func deleteRun(_ run: BenchmarkRun) {
+        withAnimation {
+            modelContext.delete(run)
+            do {
+                try modelContext.save()
+            } catch {
+                print("Failed to delete run: \(error)")
+            }
+        }
+    }
+
+    /// Resets the leaderboard by deleting all benchmark runs.
+    private func resetLeaderboard() {
+        withAnimation {
+            for run in runs {
+                modelContext.delete(run)
+            }
+            do {
+                try modelContext.save()
+            } catch {
+                print("Failed to reset leaderboard: \(error)")
+            }
+        }
+    }
+
+    /// Exports the leaderboard data as a CSV file.
+    private func exportCSV() {
+        let csvData = LeaderboardExporter.exportCSV(runs: filteredAndSortedRuns)
+        let filename = LeaderboardExporter.generateFilename()
+
+        guard let csvURL = createCSVFileURL(filename: filename, data: csvData) else {
+            return
+        }
+
+        shareSheet = ShareSheet(items: [csvURL])
+    }
+
+    /// Creates a temporary file URL for the CSV data.
+    private func createCSVFileURL(filename: String, data: String) -> URL? {
+        guard let data = data.data(using: .utf8) else {
+            return nil
+        }
+
+        let tempDirectory = FileManager.default.temporaryDirectory
+        let fileURL = tempDirectory.appending(path: filename)
+
+        do {
+            try data.write(to: fileURL)
+            return fileURL
+        } catch {
+            print("Failed to create CSV file: \(error)")
+            return nil
         }
     }
 }

@@ -20,10 +20,6 @@ struct ContentView: View {
 
     var body: some View {
         TabView {
-            Tab("Run", systemImage: "bolt.fill") {
-                RunBenchmarkView()
-            }
-
             Tab("Suite", systemImage: "list.bullet.clipboard") {
                 SuiteRunView()
             }

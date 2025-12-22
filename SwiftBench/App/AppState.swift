@@ -415,7 +415,7 @@ final class AppState {
             let extractedCode = CodeExtractor.extract(from: response)
             let tokenUsage = usage ?? TokenUsage(prompt: 0, completion: 0, total: 0)
 
-            // Calculate similarity score (fallback)
+            // Calculate similarity score (fallback for when execution isn't available)
             let similarityScore: Double
             if let reference = task.referenceCode {
                 let report = scorer.score(generated: extractedCode, benchmark: reference)
@@ -429,24 +429,72 @@ final class AppState {
             let executionResult: ExecutionResult?
             if task.hasTests {
                 executionPhase = executionService.currentPhase
-                executionResult = try? await executionService.execute(
-                    generatedCode: extractedCode,
-                    task: task
-                )
+                do {
+                    executionResult = try await executionService.execute(
+                        generatedCode: extractedCode,
+                        task: task
+                    )
+                } catch {
+                    // Log execution error but don't fail the entire run
+                    let errorLog = "[ERROR] Test execution failed for task '\(task.title)': \(error.localizedDescription)"
+                    print(errorLog)
+                    statusMessage = errorLog
+                    executionResult = nil
+                }
                 executionPhase = nil
 
                 // Log detailed execution results for debugging
                 if let result = executionResult {
+                    print("[DEBUG] Execution result for task '\(task.title)':")
+                    print("  - Compilation succeeded: \(result.compilationSucceeded)")
+                    print("  - Tests passed: \(result.testsPassed)")
+                    print("  - Tests total: \(result.testsTotal)")
+                    print("  - Test pass rate: \(result.testPassRate * 100)%")
+                    print("  - Style score: \(result.styleScore ?? 0)")
+                    print("  - Primary score: \(result.primaryScore)")
+
                     if !result.compilationSucceeded {
-                        statusMessage = "Compilation failed for task '\(task.title)': \(result.compilationErrors ?? "Unknown error")"
+                        let fullError = """
+                        Compilation failed for task '\(task.title)':
+                        \(result.compilationErrors ?? "Unknown error")
+
+                        Full compilation output:
+                        \(result.compilationOutput)
+                        """
+                        print("[DEBUG] \(fullError)")
+                        statusMessage = fullError
                     } else if !result.allTestsPassed {
-                        statusMessage = "Tests failed for task '\(task.title)': \(result.testsPassed ?? 0)/\(result.testsTotal ?? 0) passed"
+                        let failureDetails = """
+                        Tests failed for task '\(task.title)':
+                        \(result.testsPassed)/\(result.testsTotal) passed
+
+                        Full test output:
+                        \(result.testOutput)
+                        """
+                        print("[DEBUG] \(failureDetails)")
+                        statusMessage = failureDetails
                     } else {
-                        statusMessage = "Task '\(task.title)' passed all tests"
+                        let successMessage = "Task '\(task.title)' passed all tests (score: \(result.primaryScore))"
+                        print("[DEBUG] \(successMessage)")
+                        statusMessage = successMessage
                     }
+                } else {
+                    print("[DEBUG] No execution result returned for task '\(task.title)'")
+                    statusMessage = "No execution result for task '\(task.title)'"
                 }
             } else {
                 executionResult = nil
+            }
+
+            // Calculate the appropriate score based on execution results
+            let finalScore: Double
+            if let result = executionResult {
+                // Use execution results when available
+                finalScore = result.primaryScore
+            } else {
+                // Fall back to similarity score when execution wasn't performed
+                finalScore = similarityScore
+                print("[DEBUG] Using similarity score (\(finalScore)) as fallback for task '\(task.title)'")
             }
 
             let run = BenchmarkRun(
@@ -458,7 +506,7 @@ final class AppState {
                 provider: provider,
                 prompt: task.prompt,
                 response: extractedCode,
-                score: similarityScore,
+                score: finalScore,
                 compilationSucceeded: executionResult?.compilationSucceeded,
                 compilationErrors: executionResult?.compilationErrors,
                 compilationOutput: executionResult?.compilationOutput,

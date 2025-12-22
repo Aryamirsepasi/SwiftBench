@@ -5,28 +5,193 @@
 //  Created by Claude on 22.12.25.
 //
 
+import SwiftData
 import SwiftUI
 
-/// View for configuring and running benchmark suites.
+/// View for configuring and running benchmark suites or single tasks.
 struct SuiteRunView: View {
     @Environment(AppState.self) private var appState
     @Environment(\.modelContext) private var modelContext
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
 
     @State private var selectedSuite: BenchmarkSuite = .v2
     @State private var runsPerTask = 1
     @State private var temperature = 0.7
+    @State private var isConnectionExpanded = false
+    @State private var showScoreDetails = false
+    @State private var runMode: RunMode = .suite
 
     var body: some View {
         NavigationStack {
-            Form {
-                apiSection
-                suiteSection
-                configurationSection
-                runSection
+            #if os(macOS)
+            macOSLayout
+            #else
+            if horizontalSizeClass == .regular {
+                iPadLayout
+            } else {
+                iPhoneLayout
             }
-            .formStyle(.grouped)
-            .navigationTitle("Run Suite")
+            #endif
         }
+    }
+
+    // MARK: - macOS Layout (Split View)
+
+    #if os(macOS)
+    private var macOSLayout: some View {
+        HSplitView {
+            mainContent
+                .frame(minWidth: 400, idealWidth: 600)
+
+            resultsSidebar
+                .frame(
+                    minWidth: LayoutConstants.compactSidebarWidth,
+                    idealWidth: LayoutConstants.idealSidebarWidth,
+                    maxWidth: LayoutConstants.maxSidebarWidth
+                )
+        }
+        .navigationTitle("Run Benchmark")
+    }
+    #endif
+
+    // MARK: - iPad Layout (Horizontal Split)
+
+    private var iPadLayout: some View {
+        HStack(spacing: 0) {
+            mainContent
+                .frame(maxWidth: .infinity)
+
+            Divider()
+
+            resultsSidebar
+                .frame(width: LayoutConstants.idealSidebarWidth)
+        }
+        .navigationTitle("Run Benchmark")
+    }
+
+    // MARK: - iPhone Layout (Vertical Stack)
+
+    private var iPhoneLayout: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: LayoutConstants.sectionSpacing) {
+                runModeSelector
+                apiSection
+
+                if runMode == .single {
+                    singleTaskPromptSection
+                    singleTaskRunControls
+                } else {
+                    suiteSection
+                    configurationSection
+                    suiteRunControls
+                }
+
+                if !appState.streamedResponse.isEmpty {
+                    outputSection
+                }
+
+                if let report = appState.latestScoreReport {
+                    VStack(spacing: LayoutConstants.sectionSpacing) {
+                        ScoreBadgeView(score: report.score, showDetails: $showScoreDetails)
+
+                        if showScoreDetails {
+                            ScoreSummaryView(
+                                report: report,
+                                usage: appState.latestUsage,
+                                provider: appState.latestProvider,
+                                model: appState.latestModelUsed
+                            )
+                            .transition(.opacity.combined(with: .move(edge: .top)))
+                        }
+                    }
+                }
+
+                if let statusMessage = appState.statusMessage {
+                    Text(statusMessage)
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .padding(.horizontal)
+            .padding(.bottom)
+        }
+        .scrollIndicators(.hidden)
+        .navigationTitle("Run Benchmark")
+    }
+
+    // MARK: - Shared Components
+
+    private var mainContent: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: LayoutConstants.sectionSpacing) {
+                runModeSelector
+                apiSection
+
+                if runMode == .single {
+                    singleTaskPromptSection
+                    singleTaskRunControls
+                } else {
+                    suiteSection
+                    configurationSection
+                    suiteRunControls
+                }
+
+                if !appState.streamedResponse.isEmpty {
+                    outputSection
+                }
+
+                if let statusMessage = appState.statusMessage {
+                    Text(statusMessage)
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .padding(LayoutConstants.contentPadding)
+        }
+        .scrollIndicators(.hidden)
+    }
+
+    private var resultsSidebar: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: LayoutConstants.sectionSpacing) {
+                if let report = appState.latestScoreReport {
+                    VStack(spacing: LayoutConstants.sectionSpacing) {
+                        ScoreBadgeView(score: report.score, showDetails: $showScoreDetails)
+
+                        if showScoreDetails {
+                            ScoreSummaryView(
+                                report: report,
+                                usage: appState.latestUsage,
+                                provider: appState.latestProvider,
+                                model: appState.latestModelUsed
+                            )
+                            .transition(.opacity.combined(with: .move(edge: .top)))
+                        }
+                    }
+                } else {
+                    ContentUnavailableView(
+                        "No Results",
+                        systemImage: "chart.bar.doc.horizontal",
+                        description: Text("Run a benchmark to see results here.")
+                    )
+                }
+            }
+            .padding(LayoutConstants.contentPadding)
+        }
+        .scrollIndicators(.hidden)
+        .background(.background.secondary)
+    }
+
+    // MARK: - Run Mode Selector
+
+    private var runModeSelector: some View {
+        Picker("Run Mode", selection: $runMode) {
+            ForEach(RunMode.allCases) { mode in
+                Text(mode.rawValue).tag(mode)
+            }
+        }
+        .pickerStyle(.segmented)
+        .padding(.bottom, LayoutConstants.sectionSpacing)
     }
 
     // MARK: - Sections
@@ -34,31 +199,103 @@ struct SuiteRunView: View {
     private var apiSection: some View {
         @Bindable var state = appState
 
-        return Section("API Configuration") {
-            SecureField("OpenRouter API Key", text: $state.apiKey)
-                .textContentType(.password)
+        let isConfigured = !state.trimmedAPIKey.isEmpty && !state.activeModelIdentifier.isEmpty
 
-            HStack {
-                Button("Save Key") {
-                    appState.saveAPIKey()
+        return GroupBox {
+            if isConfigured && !isConnectionExpanded {
+                // Compact view when configured
+                HStack {
+                    Image(systemName: "checkmark.circle.fill")
+                        .foregroundStyle(.green)
+
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Ready to Run")
+                            .font(.headline)
+                        Text(state.activeModelIdentifier)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    Spacer()
+
+                    Button("Configure") {
+                        withAnimation(.spring()) {
+                            isConnectionExpanded = true
+                        }
+                    }
+                    .buttonStyle(.bordered)
                 }
-                .disabled(appState.apiKey.isEmpty)
+            } else {
+                // Expanded view
+                DisclosureGroup("Connection", isExpanded: $isConnectionExpanded) {
+                    VStack(alignment: .leading, spacing: LayoutConstants.controlSpacing) {
+                        #if os(iOS) || os(visionOS)
+                        SecureField("OpenRouter API Key", text: $state.apiKey)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+                            .textContentType(.password)
+                        #else
+                        SecureField("OpenRouter API Key", text: $state.apiKey)
+                        #endif
 
-                Button("Clear Key", role: .destructive) {
-                    appState.clearAPIKey()
+                        HStack(spacing: LayoutConstants.controlSpacing) {
+                            Button {
+                                appState.saveAPIKey()
+                            } label: {
+                                Label("Save Key", systemImage: "key.fill")
+                            }
+
+                            Button(role: .destructive) {
+                                appState.clearAPIKey()
+                            } label: {
+                                Label("Clear Key", systemImage: "key.slash")
+                            }
+                        }
+
+                        Picker("Model", selection: $state.modelPreset) {
+                            ForEach(OpenRouterModelPreset.allCases) { preset in
+                                Text(preset.displayName)
+                                    .tag(preset)
+                            }
+                        }
+                        .pickerStyle(.menu)
+
+                        if state.modelPreset == .custom {
+                            #if os(iOS) || os(visionOS)
+                            TextField("Custom model identifier", text: $state.customModelIdentifier)
+                                .textInputAutocapitalization(.never)
+                                .autocorrectionDisabled()
+                            #else
+                            TextField("Custom model identifier", text: $state.customModelIdentifier)
+                            #endif
+                        }
+
+                        Text("Active model: \(state.activeModelIdentifier)")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
                 }
-                .disabled(appState.apiKey.isEmpty)
             }
+        }
+    }
 
-            Picker("Model", selection: $state.modelPreset) {
-                ForEach(OpenRouterModelPreset.allCases) { preset in
-                    Text(preset.displayName).tag(preset)
-                }
-            }
+    private var singleTaskPromptSection: some View {
+        @Bindable var state = appState
 
-            if appState.modelPreset == .custom {
-                TextField("Custom Model ID", text: $state.customModelIdentifier)
-            }
+        return GroupBox("Prompt") {
+            #if os(iOS) || os(visionOS)
+            TextEditor(text: $state.prompt)
+                .font(.body.monospaced())
+                .autocorrectionDisabled()
+                .textInputAutocapitalization(.never)
+                .frame(height: 160)
+                .clipShape(.rect(cornerRadius: LayoutConstants.cornerRadius))
+            #else
+            TextEditor(text: $state.prompt)
+                .font(.body.monospaced())
+                .frame(height: 160)
+                .clipShape(.rect(cornerRadius: LayoutConstants.cornerRadius))
+            #endif
         }
     }
 
@@ -66,7 +303,8 @@ struct SuiteRunView: View {
         Section("Benchmark Suite") {
             Picker("Suite", selection: $selectedSuite) {
                 ForEach(BenchmarkSuite.allSuites, id: \.id) { suite in
-                    Text(suite.title).tag(suite)
+                    Text(suite.title)
+                        .tag(suite)
                 }
             }
 
@@ -107,7 +345,33 @@ struct SuiteRunView: View {
         }
     }
 
-    private var runSection: some View {
+    private var singleTaskRunControls: some View {
+        HStack(spacing: LayoutConstants.controlSpacing) {
+            Button {
+                appState.startBenchmark(using: modelContext)
+            } label: {
+                Label("Run Benchmark", systemImage: "bolt.fill")
+            }
+            .buttonStyle(.borderedProminent)
+            .disabled(appState.isRunning || appState.trimmedAPIKey.isEmpty || appState.activeModelIdentifier.isEmpty)
+
+            Button(role: .cancel) {
+                appState.cancelBenchmark()
+            } label: {
+                Label("Stop", systemImage: "stop.fill")
+            }
+            .buttonStyle(.bordered)
+            .disabled(!appState.isRunning)
+
+            if appState.isRunning {
+                ProgressView()
+            }
+
+            Spacer()
+        }
+    }
+
+    private var suiteRunControls: some View {
         Section {
             if appState.isSuiteRunning {
                 SuiteProgressView()
@@ -134,6 +398,65 @@ struct SuiteRunView: View {
             }
         }
     }
+
+    private var outputSection: some View {
+        GroupBox {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    Text("Output")
+                        .font(.headline)
+
+                    Spacer()
+
+                    if appState.isRunning {
+                        HStack(spacing: 4) {
+                            Circle()
+                                .fill(.green)
+                                .frame(width: 8, height: 8)
+
+                            Text("Streaming...")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+
+                            if let usage = appState.latestUsage {
+                                Text("\(usage.total) tokens")
+                                    .font(.caption2)
+                                    .foregroundStyle(.tertiary)
+                            }
+                        }
+                    } else if !appState.streamedResponse.isEmpty {
+                        if let usage = appState.latestUsage {
+                            Text("\(usage.total) tokens")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+
+                ZStack(alignment: .topLeading) {
+                    CodeTextView(text: appState.streamedResponse)
+                        .frame(minHeight: LayoutConstants.minimumEditorHeight)
+                        .clipShape(.rect(cornerRadius: LayoutConstants.cornerRadius))
+
+                    if appState.streamedResponse.isEmpty {
+                        Text("Streaming output appears here.")
+                            .foregroundStyle(.secondary)
+                            .padding(.top, LayoutConstants.controlSpacing)
+                            .padding(.leading, LayoutConstants.controlSpacing)
+                    }
+                }
+            }
+        }
+    }
+}
+
+// MARK: - Run Mode
+
+enum RunMode: String, CaseIterable, Identifiable {
+    case single = "Single Task"
+    case suite = "Full Suite"
+    
+    var id: String { rawValue }
 }
 
 // MARK: - Progress View

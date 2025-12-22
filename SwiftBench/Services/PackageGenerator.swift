@@ -56,6 +56,9 @@ enum PackageGenerator {
         generatedCode: String,
         task: BenchmarkTask
     ) throws -> URL {
+        // Validate generated code structure
+        try validateGeneratedCode(generatedCode, for: task)
+
         // Create unique directory for this package
         let packageID = UUID().uuidString
         let packageDir = tempDirectory.appending(path: "Benchmark_\(packageID)", directoryHint: .isDirectory)
@@ -74,7 +77,10 @@ enum PackageGenerator {
         try FileManager.default.createDirectory(at: testsDir, withIntermediateDirectories: true)
 
         // Write Package.swift
-        let packageManifest = generatePackageManifest(includeSwiftSyntax: !task.styleRules.isEmpty)
+        let packageManifest = generatePackageManifest(
+            includeSwiftSyntax: !task.styleRules.isEmpty,
+            includeSwiftUI: requiresSwiftUI(task)
+        )
         try writeFile(packageManifest, to: packageDir.appending(path: "Package.swift"))
 
         // Write generated code
@@ -90,6 +96,7 @@ enum PackageGenerator {
             try writeFile(styleTests, to: testsDir.appending(path: "StyleAnalysisTests.swift"))
         }
 
+        print("[DEBUG] Package created at: \(packageDir.path())")
         return packageDir
     }
 
@@ -107,6 +114,70 @@ enum PackageGenerator {
 
     // MARK: - Private Helpers
 
+    /// Determines if a task requires SwiftUI as a dependency.
+    private static func requiresSwiftUI(_ task: BenchmarkTask) -> Bool {
+        // Check category
+        if task.category == .swiftUIComposition {
+            return true
+        }
+
+        // Check style rules for SwiftUI-related patterns
+        let swiftUIStyleRules: Set<String> = [
+            StyleRules.useForegroundStyle,
+            StyleRules.useClipShapeRect,
+            StyleRules.useScaledMetric,
+            StyleRules.useScrollIndicators,
+            StyleRules.useContentUnavailable,
+            StyleRules.useNavigationStack,
+            StyleRules.useTabAPI,
+            StyleRules.noForegroundColor,
+            StyleRules.noCornerRadius,
+            StyleRules.noTabItem,
+            StyleRules.noNavigationView,
+        ]
+        return !task.styleRules.filter { swiftUIStyleRules.contains($0) }.isEmpty
+    }
+
+    private static func validateGeneratedCode(_ code: String, for task: BenchmarkTask) throws {
+        let trimmedCode = code.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        print("[DEBUG] Validating generated code for task: \(task.title)")
+
+        // Check if code is empty
+        guard !trimmedCode.isEmpty else {
+            print("[ERROR] Generated code is empty for task: \(task.title)")
+            throw PackageGeneratorError.invalidTask
+        }
+
+        // Check if function is expected to exist
+        if let expectedFunction = task.functionName {
+            let functionExists = trimmedCode.contains("func \(expectedFunction)(")
+
+            print("[DEBUG] Expected function '\(expectedFunction)' exists: \(functionExists)")
+
+            guard functionExists else {
+                let errorMessage = """
+                Generated code does not contain expected function '\(expectedFunction)' for task '\(task.title)'.
+                
+                Expected function signature: \(task.expectedSignature ?? "unknown")
+                
+                Generated code (first 500 chars):
+                \(String(trimmedCode.prefix(500)))
+                """
+                print("[ERROR] \(errorMessage)")
+                throw PackageGeneratorError.invalidTask
+            }
+        }
+
+        // Basic Swift syntax validation
+        if trimmedCode.contains("{") && !trimmedCode.contains("}") {
+            print("[ERROR] Generated code has unbalanced braces")
+            throw PackageGeneratorError.invalidTask
+        }
+
+        print("[DEBUG] Generated code validation passed")
+    }
+
     private static func writeFile(_ content: String, to url: URL) throws {
         do {
             try content.write(to: url, atomically: true, encoding: .utf8)
@@ -117,49 +188,52 @@ enum PackageGenerator {
 
     // MARK: - Package.swift Generation
 
-    private static func generatePackageManifest(includeSwiftSyntax: Bool) -> String {
+    private static func generatePackageManifest(includeSwiftSyntax: Bool, includeSwiftUI: Bool) -> String {
+        var dependencies: [String] = []
         if includeSwiftSyntax {
-            return """
-            // swift-tools-version: 6.0
-            import PackageDescription
-
-            let package = Package(
-                name: "BenchmarkEvaluation",
-                platforms: [.macOS(.v15)],
-                dependencies: [
+            dependencies.append("""
                     .package(url: "https://github.com/swiftlang/swift-syntax", from: "600.0.0")
-                ],
-                targets: [
-                    .target(name: "GeneratedCode"),
-                    .testTarget(
-                        name: "GeneratedCodeTests",
-                        dependencies: [
-                            "GeneratedCode",
-                            .product(name: "SwiftSyntax", package: "swift-syntax"),
-                            .product(name: "SwiftParser", package: "swift-syntax"),
-                        ]
-                    )
-                ]
-            )
-            """
-        } else {
-            return """
-            // swift-tools-version: 6.0
-            import PackageDescription
-
-            let package = Package(
-                name: "BenchmarkEvaluation",
-                platforms: [.macOS(.v15)],
-                targets: [
-                    .target(name: "GeneratedCode"),
-                    .testTarget(
-                        name: "GeneratedCodeTests",
-                        dependencies: ["GeneratedCode"]
-                    )
-                ]
-            )
-            """
+            """)
         }
+
+        var testDependencies: [String] = ["\"GeneratedCode\""]
+        if includeSwiftSyntax {
+            testDependencies.append(contentsOf: [
+                ".product(name: \"SwiftSyntax\", package: \"swift-syntax\")",
+                ".product(name: \"SwiftParser\", package: \"swift-syntax\")"
+            ])
+        }
+        if includeSwiftUI {
+            testDependencies.append(".product(name: \"SwiftUI\", package: \"swift\")")
+        }
+
+        let dependenciesSection = dependencies.isEmpty ? "" : """
+        dependencies: [
+            \(dependencies.joined(separator: "\n"))
+        ],
+        """
+
+        let testDependenciesSection = testDependencies.joined(separator: ",\n                            ")
+
+        return """
+        // swift-tools-version: 6.0
+        import PackageDescription
+
+        let package = Package(
+            name: "BenchmarkEvaluation",
+            platforms: [.macOS(.v15)],
+            \(dependenciesSection)
+            targets: [
+                .target(name: "GeneratedCode"),
+                .testTarget(
+                    name: "GeneratedCodeTests",
+                    dependencies: [
+                        \(testDependenciesSection)
+                    ]
+                )
+            ]
+        )
+        """
     }
 
     // MARK: - Test Code Generation

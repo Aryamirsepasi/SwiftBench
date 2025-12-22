@@ -51,7 +51,21 @@ extension BenchmarkSuite {
                 IOPair(input: "10", expectedOutput: "55"),
                 IOPair(input: "20", expectedOutput: "6765"),
             ],
-            functionName: "fibonacci",
+            referenceCode: """
+            func fibonacci(_ n: Int) -> Int {
+                guard n > 0 else { return 0 }
+                guard n > 1 else { return 1 }
+            
+                var a = 0
+                var b = 1
+                for _ in 2...n {
+                    let temp = a + b
+                    a = b
+                    b = temp
+                }
+                return b
+            }
+            """, functionName: "fibonacci",
             expectedSignature: "func fibonacci(_ n: Int) -> Int"
         ),
 
@@ -73,7 +87,12 @@ extension BenchmarkSuite {
                 IOPair(input: "\"A man a plan a canal Panama\"", expectedOutput: "true"),
                 IOPair(input: "\"hello\"", expectedOutput: "false"),
             ],
-            functionName: "isPalindrome",
+            referenceCode: """
+            func isPalindrome(_ s: String) -> Bool {
+                let cleaned = s.lowercased().filter { $0.isLetter || $0.isNumber }
+                return cleaned == String(cleaned.reversed())
+            }
+            """, functionName: "isPalindrome",
             expectedSignature: "func isPalindrome(_ s: String) -> Bool"
         ),
 
@@ -96,6 +115,25 @@ extension BenchmarkSuite {
                 IOPair(input: "[1, 2, 3, 4, 5], target: 6", expectedOutput: "nil"),
                 IOPair(input: "[], target: 1", expectedOutput: "nil"),
             ],
+            referenceCode: """
+            func binarySearch(_ array: [Int], target: Int) -> Int? {
+                var left = 0
+                var right = array.count - 1
+
+                while left <= right {
+                    let mid = left + (right - left) / 2
+                    if array[mid] == target {
+                        return mid
+                    } else if array[mid] < target {
+                        left = mid + 1
+                    } else {
+                        right = mid - 1
+                    }
+                }
+
+                return nil
+            }
+            """,
             functionName: "binarySearch",
             expectedSignature: "func binarySearch(_ array: [Int], target: Int) -> Int?"
         ),
@@ -118,6 +156,35 @@ extension BenchmarkSuite {
                 IOPair(input: "[], [1, 2, 3]", expectedOutput: "[1, 2, 3]"),
                 IOPair(input: "[1], [1]", expectedOutput: "[1, 1]"),
             ],
+            referenceCode: """
+            func mergeSorted(_ a: [Int], _ b: [Int]) -> [Int] {
+                var result: [Int] = []
+                var i = 0
+                var j = 0
+
+                while i < a.count && j < b.count {
+                    if a[i] <= b[j] {
+                        result.append(a[i])
+                        i += 1
+                    } else {
+                        result.append(b[j])
+                        j += 1
+                    }
+                }
+
+                while i < a.count {
+                    result.append(a[i])
+                    i += 1
+                }
+
+                while j < b.count {
+                    result.append(b[j])
+                    j += 1
+                }
+
+                return result
+            }
+            """,
             functionName: "mergeSorted",
             expectedSignature: "func mergeSorted(_ a: [Int], _ b: [Int]) -> [Int]"
         ),
