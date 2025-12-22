@@ -7,7 +7,7 @@
 
 import Foundation
 
-enum OpenRouterModelPreset: String, CaseIterable, Identifiable {
+enum OpenRouterModelPreset: String, CaseIterable, Identifiable, Hashable {
     case devstral2512 = "Devstral 2512"
     case qwen3Coder = "Qwen 3 Coder"
     case claudeSonnet = "Claude 4.5 Sonnet"
@@ -15,6 +15,8 @@ enum OpenRouterModelPreset: String, CaseIterable, Identifiable {
     case custom = "Custom"
 
     var id: String { rawValue }
+
+    var displayName: String { rawValue }
 
     var modelID: String? {
         switch self {

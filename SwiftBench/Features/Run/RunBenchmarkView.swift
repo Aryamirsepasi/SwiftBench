@@ -14,6 +14,9 @@ struct RunBenchmarkView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
 
+    @State private var isConnectionExpanded = false
+    @State private var showScoreDetails = false
+
     var body: some View {
         NavigationStack {
             #if os(macOS)
@@ -37,7 +40,11 @@ struct RunBenchmarkView: View {
                 .frame(minWidth: 400, idealWidth: 600)
 
             resultsSidebar
-                .frame(minWidth: 280, idealWidth: 320, maxWidth: 400)
+                .frame(
+                    minWidth: LayoutConstants.compactSidebarWidth,
+                    idealWidth: LayoutConstants.idealSidebarWidth,
+                    maxWidth: LayoutConstants.maxSidebarWidth
+                )
         }
         .navigationTitle("Run Benchmark")
     }
@@ -53,7 +60,7 @@ struct RunBenchmarkView: View {
             Divider()
 
             resultsSidebar
-                .frame(width: 320)
+                .frame(width: LayoutConstants.idealSidebarWidth)
         }
         .navigationTitle("Run Benchmark")
     }
@@ -62,19 +69,26 @@ struct RunBenchmarkView: View {
 
     private var iPhoneLayout: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: sectionSpacing) {
+            VStack(alignment: .leading, spacing: LayoutConstants.sectionSpacing) {
                 connectionSection
                 promptSection
                 runControls
                 outputSection
 
                 if let report = appState.latestScoreReport {
-                    ScoreSummaryView(
-                        report: report,
-                        usage: appState.latestUsage,
-                        provider: appState.latestProvider,
-                        model: appState.latestModelUsed
-                    )
+                    VStack(spacing: LayoutConstants.sectionSpacing) {
+                        ScoreBadgeView(score: report.score, showDetails: $showScoreDetails)
+
+                        if showScoreDetails {
+                            ScoreSummaryView(
+                                report: report,
+                                usage: appState.latestUsage,
+                                provider: appState.latestProvider,
+                                model: appState.latestModelUsed
+                            )
+                            .transition(.opacity.combined(with: .move(edge: .top)))
+                        }
+                    }
                 }
 
                 if let statusMessage = appState.statusMessage {
@@ -92,13 +106,9 @@ struct RunBenchmarkView: View {
 
     // MARK: - Shared Components
 
-    @ScaledMetric private var sectionSpacing = 16
-    @ScaledMetric private var controlSpacing = 12
-    @ScaledMetric private var cornerRadius = 16
-
     private var mainContent: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: sectionSpacing) {
+            VStack(alignment: .leading, spacing: LayoutConstants.sectionSpacing) {
                 connectionSection
                 promptSection
                 runControls
@@ -110,21 +120,28 @@ struct RunBenchmarkView: View {
                         .foregroundStyle(.secondary)
                 }
             }
-            .padding()
+            .padding(LayoutConstants.contentPadding)
         }
         .scrollIndicators(.hidden)
     }
 
     private var resultsSidebar: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: sectionSpacing) {
+            VStack(alignment: .leading, spacing: LayoutConstants.sectionSpacing) {
                 if let report = appState.latestScoreReport {
-                    ScoreSummaryView(
-                        report: report,
-                        usage: appState.latestUsage,
-                        provider: appState.latestProvider,
-                        model: appState.latestModelUsed
-                    )
+                    VStack(spacing: LayoutConstants.sectionSpacing) {
+                        ScoreBadgeView(score: report.score, showDetails: $showScoreDetails)
+
+                        if showScoreDetails {
+                            ScoreSummaryView(
+                                report: report,
+                                usage: appState.latestUsage,
+                                provider: appState.latestProvider,
+                                model: appState.latestModelUsed
+                            )
+                            .transition(.opacity.combined(with: .move(edge: .top)))
+                        }
+                    }
                 } else {
                     ContentUnavailableView(
                         "No Results",
@@ -133,7 +150,7 @@ struct RunBenchmarkView: View {
                     )
                 }
             }
-            .padding()
+            .padding(LayoutConstants.contentPadding)
         }
         .scrollIndicators(.hidden)
         .background(.background.secondary)
@@ -144,52 +161,82 @@ struct RunBenchmarkView: View {
     private var connectionSection: some View {
         @Bindable var appState = appState
 
-        return GroupBox("Connection") {
-            VStack(alignment: .leading, spacing: controlSpacing) {
-                #if os(iOS) || os(visionOS)
-                SecureField("OpenRouter API Key", text: $appState.apiKey)
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
-                    .textContentType(.password)
-                #else
-                SecureField("OpenRouter API Key", text: $appState.apiKey)
-                #endif
+        let isConfigured = !appState.trimmedAPIKey.isEmpty && !appState.activeModelIdentifier.isEmpty
 
-                HStack(spacing: controlSpacing) {
-                    Button {
-                        appState.saveAPIKey()
-                    } label: {
-                        Label("Save Key", systemImage: "key.fill")
+        return GroupBox {
+            if isConfigured && !isConnectionExpanded {
+                // Compact view when configured
+                HStack {
+                    Image(systemName: "checkmark.circle.fill")
+                        .foregroundStyle(.green)
+
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Ready to Run")
+                            .font(.headline)
+                        Text(appState.activeModelIdentifier)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
                     }
 
-                    Button(role: .destructive) {
-                        appState.clearAPIKey()
-                    } label: {
-                        Label("Clear Key", systemImage: "key.slash")
+                    Spacer()
+
+                    Button("Configure") {
+                        withAnimation(.spring()) {
+                            isConnectionExpanded = true
+                        }
+                    }
+                    .buttonStyle(.bordered)
+                }
+            } else {
+                // Expanded view
+                DisclosureGroup("Connection", isExpanded: $isConnectionExpanded) {
+                    VStack(alignment: .leading, spacing: LayoutConstants.controlSpacing) {
+                        #if os(iOS) || os(visionOS)
+                        SecureField("OpenRouter API Key", text: $appState.apiKey)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+                            .textContentType(.password)
+                        #else
+                        SecureField("OpenRouter API Key", text: $appState.apiKey)
+                        #endif
+
+                        HStack(spacing: LayoutConstants.controlSpacing) {
+                            Button {
+                                appState.saveAPIKey()
+                            } label: {
+                                Label("Save Key", systemImage: "key.fill")
+                            }
+
+                            Button(role: .destructive) {
+                                appState.clearAPIKey()
+                            } label: {
+                                Label("Clear Key", systemImage: "key.slash")
+                            }
+                        }
+
+                        Picker("Model", selection: $appState.modelPreset) {
+                            ForEach(OpenRouterModelPreset.allCases) { preset in
+                                Text(preset.rawValue)
+                                    .tag(preset)
+                            }
+                        }
+                        .pickerStyle(.menu)
+
+                        if appState.modelPreset == .custom {
+                            #if os(iOS) || os(visionOS)
+                            TextField("Custom model identifier", text: $appState.customModelIdentifier)
+                                .textInputAutocapitalization(.never)
+                                .autocorrectionDisabled()
+                            #else
+                            TextField("Custom model identifier", text: $appState.customModelIdentifier)
+                            #endif
+                        }
+
+                        Text("Active model: \(appState.activeModelIdentifier)")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
                     }
                 }
-
-                Picker("Model", selection: $appState.modelPreset) {
-                    ForEach(OpenRouterModelPreset.allCases) { preset in
-                        Text(preset.rawValue)
-                            .tag(preset)
-                    }
-                }
-                .pickerStyle(.menu)
-
-                if appState.modelPreset == .custom {
-                    #if os(iOS) || os(visionOS)
-                    TextField("Custom model identifier", text: $appState.customModelIdentifier)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-                    #else
-                    TextField("Custom model identifier", text: $appState.customModelIdentifier)
-                    #endif
-                }
-
-                Text("Active model: \(appState.activeModelIdentifier)")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
             }
         }
     }
@@ -204,18 +251,18 @@ struct RunBenchmarkView: View {
                 .autocorrectionDisabled()
                 .textInputAutocapitalization(.never)
                 .frame(height: 160)
-                .clipShape(.rect(cornerRadius: cornerRadius))
+                .clipShape(.rect(cornerRadius: LayoutConstants.cornerRadius))
             #else
             TextEditor(text: $appState.prompt)
                 .font(.body.monospaced())
                 .frame(height: 160)
-                .clipShape(.rect(cornerRadius: cornerRadius))
+                .clipShape(.rect(cornerRadius: LayoutConstants.cornerRadius))
             #endif
         }
     }
 
     private var runControls: some View {
-        HStack(spacing: controlSpacing) {
+        HStack(spacing: LayoutConstants.controlSpacing) {
             Button {
                 appState.startBenchmark(using: modelContext)
             } label: {
@@ -241,17 +288,50 @@ struct RunBenchmarkView: View {
     }
 
     private var outputSection: some View {
-        GroupBox("Output") {
-            ZStack(alignment: .topLeading) {
-                CodeTextView(text: appState.streamedResponse)
-                    .frame(minHeight: 200)
-                    .clipShape(.rect(cornerRadius: cornerRadius))
+        GroupBox {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    Text("Output")
+                        .font(.headline)
 
-                if appState.streamedResponse.isEmpty {
-                    Text("Streaming output appears here.")
-                        .foregroundStyle(.secondary)
-                        .padding(.top, controlSpacing)
-                        .padding(.leading, controlSpacing)
+                    Spacer()
+
+                    if appState.isRunning {
+                        HStack(spacing: 4) {
+                            Circle()
+                                .fill(.green)
+                                .frame(width: 8, height: 8)
+
+                            Text("Streaming...")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+
+                            if let usage = appState.latestUsage {
+                                Text("\(usage.total) tokens")
+                                    .font(.caption2)
+                                    .foregroundStyle(.tertiary)
+                            }
+                        }
+                    } else if !appState.streamedResponse.isEmpty {
+                        if let usage = appState.latestUsage {
+                            Text("\(usage.total) tokens")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+
+                ZStack(alignment: .topLeading) {
+                    CodeTextView(text: appState.streamedResponse)
+                        .frame(minHeight: LayoutConstants.minimumEditorHeight)
+                        .clipShape(.rect(cornerRadius: LayoutConstants.cornerRadius))
+
+                    if appState.streamedResponse.isEmpty {
+                        Text("Streaming output appears here.")
+                            .foregroundStyle(.secondary)
+                            .padding(.top, LayoutConstants.controlSpacing)
+                            .padding(.leading, LayoutConstants.controlSpacing)
+                    }
                 }
             }
         }

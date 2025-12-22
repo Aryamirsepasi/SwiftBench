@@ -16,6 +16,7 @@ struct SwiftBenchApp: App {
     private let sharedModelContainer: ModelContainer = {
         let schema = Schema([
             BenchmarkRun.self,
+            SuiteRunResult.self,
         ])
         let modelConfiguration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: false)
 

@@ -117,7 +117,7 @@ You can also enter any custom model identifier supported by OpenRouter.
 
 ## License
 
-MIT License - See LICENSE file for details.
+See LICENSE file for details.
 
 ## Contributing
 
