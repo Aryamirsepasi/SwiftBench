@@ -156,14 +156,7 @@ struct TaskRowView: View {
                     DifficultyBadge(difficulty: task.difficulty)
 
                     if task.hasTests {
-                        Label(
-                            task.usesIOTesting ? "IO" : "XT",
-                            systemImage: task.usesIOTesting ? "arrow.left.arrow.right" : "checkmark.circle"
-                        )
-                        .font(.caption2.weight(.semibold))
-                        .foregroundStyle(.green)
-                        .padding(4)
-                        .background(Color.green.opacity(0.15), in: .circle)
+                        TestTypeBadge(testType: task.usesIOTesting ? .io : .xctest)
                     }
                 }
             }

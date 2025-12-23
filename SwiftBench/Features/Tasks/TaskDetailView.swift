@@ -55,12 +55,11 @@ struct TaskDetailView: View {
             }
 
             LabeledContent("Test Type") {
-                if task.usesIOTesting {
-                    Label("Input/Output Pairs", systemImage: "arrow.left.arrow.right")
-                } else if task.usesXCTest {
-                    Label("XCTest", systemImage: "checkmark.circle")
+                if task.hasTests {
+                    TestTypeBadge(testType: task.usesIOTesting ? .io : .xctest)
                 } else {
                     Label("Compilation Only", systemImage: "hammer")
+                        .foregroundStyle(.secondary)
                 }
             }
 

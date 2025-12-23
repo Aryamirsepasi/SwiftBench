@@ -56,10 +56,14 @@ struct LeaderboardRowView: View {
                 .font(.headline)
                 .lineLimit(1)
 
-            HStack(spacing: 8) {
-                Label("\(run.tokenTotal)", systemImage: "number")
+            HStack(spacing: 12) {
+                Text("\(run.tokenTotal) tokens")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+
+                Text("·")
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
 
                 Text(run.createdAt, format: .dateTime.month(.abbreviated).day())
                     .font(.caption)
